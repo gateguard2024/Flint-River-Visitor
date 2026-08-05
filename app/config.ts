@@ -6,7 +6,7 @@ export const SITE_CONFIG = {
   emergencyPhone: process.env.NEXT_PUBLIC_EMERGENCY_PHONE || "",
   footerText: "SECURED BY GATE GUARD",
   hours: {
-    weekdays: { open: 9, close: 18 }, 
+    weekdays: { open: 10, close: 17 },
     saturday: { open: 10, close: 16 },
     sunday: { closed: true }
   }
