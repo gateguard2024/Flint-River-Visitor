@@ -1,0 +1,226 @@
+"use client";
+import React, { useState, useEffect, useMemo } from 'react';
+import { Search, Phone, ArrowLeft, Loader2, EyeOff, ShieldCheck, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { SITE_CONFIG } from '../config';
+import { captureGateFromUrl, getGate } from '../lib/gate';
+
+// --- REQUEST ENTRY POPUP ---
+const VISIT_REASONS = [
+  'Guest / Visiting',
+  'Delivery / Courier',
+  'Contractor / Service',
+  'Rideshare / Pick-up',
+  'Other',
+];
+
+const VisitorPhoneModal = ({ isOpen, onClose, onConfirm, residentName }: any) => {
+  const [name, setName] = useState('');
+  const [reason, setReason] = useState('');
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-sm">
+      <div className="w-full max-w-md bg-[#111] border border-white/10 rounded-[2.5rem] p-8 shadow-2xl">
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <h3 className="text-xl font-black uppercase italic tracking-tighter text-blue-500">Request Entry</h3>
+            <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-1">Notifying {residentName}</p>
+          </div>
+          <button onClick={onClose} className="p-2 bg-white/5 rounded-full text-slate-500"><X size={20}/></button>
+        </div>
+
+        <input
+          type="text"
+          placeholder="Your Full Name"
+          className="w-full bg-black border border-white/10 p-5 rounded-2xl text-xl text-center font-black text-white outline-none mb-4"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+
+        <select
+          className="w-full bg-black border border-white/10 p-5 rounded-2xl text-lg text-center font-black text-white outline-none mb-6 appearance-none"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        >
+          <option value="" disabled>Reason for Visit</option>
+          {VISIT_REASONS.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+
+        <button
+          onClick={() => onConfirm(name, reason)}
+          disabled={name.trim() === '' || reason === ''}
+          className="w-full bg-blue-600 py-5 rounded-2xl font-black uppercase italic text-sm disabled:opacity-30 transition-opacity"
+        >
+          Call Resident to Open Gate
+        </button>
+        <p className="text-slate-600 text-[9px] font-bold uppercase tracking-widest mt-4 text-center">
+          The resident will be called and can open the gate from their phone.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+export default function SecureDirectory() {
+  const router = useRouter();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [residents, setResidents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [callingId, setCallingId] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedResident, setSelectedResident] = useState<any>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => { captureGateFromUrl(); }, []);
+
+  useEffect(() => {
+    async function fetchResidents() {
+      try {
+        const response = await fetch(`/api/brivo?t=${Date.now()}`, {
+          cache: 'no-store',
+          headers: { 'Pragma': 'no-cache' }
+        });
+        const data = await response.json();
+        if (!response.ok || !Array.isArray(data)) {
+          throw new Error(data?.error || 'The directory is temporarily unavailable.');
+        }
+        setResidents(data);
+      } catch (e: any) {
+        console.error("Directory fetch failed:", e);
+        setLoadError(e?.message || 'The directory is temporarily unavailable.');
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchResidents();
+  }, []);
+
+  const filteredResidents = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (term.length < 3) return [];
+    return residents.filter((res: any) =>
+      // `search` holds the full first + last name; fall back to last name.
+      (res?.search || res?.lastName?.toLowerCase() || '').includes(term)
+    );
+  }, [residents, searchTerm]);
+
+  const handlePrivacyCall = async (visitorName: string, reason: string) => {
+    setIsModalOpen(false);
+    setCallingId(selectedResident.id);
+    try {
+      const response = await fetch('/api/gate-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          visitorName,
+          reason,
+          gate: getGate(),
+          residentPhone: selectedResident.phoneNumber,
+          residentName: `${selectedResident.firstName} ${selectedResident.lastName}`
+        })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Could not reach the resident.');
+      }
+      alert(`Calling ${selectedResident.firstName} ${selectedResident.lastName} now. They can open the gate from their phone.`);
+    } catch (e: any) {
+      alert(e?.message || "Error. Please try again.");
+    } finally {
+      setCallingId(null);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-black text-white flex flex-col items-center font-sans overflow-hidden">
+      
+      <VisitorPhoneModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onConfirm={handlePrivacyCall} 
+        residentName={selectedResident ? `${selectedResident.firstName} ${selectedResident.lastName}` : ''} 
+      />
+      
+      <div className="w-full max-w-md p-6 flex flex-col flex-grow">
+        <header className="w-full flex items-center justify-between mb-8 pt-4">
+          <button onClick={() => router.push('/')} className="p-3 bg-white/5 rounded-2xl text-slate-400 hover:bg-white/10 transition-colors">
+            <ArrowLeft size={24} />
+          </button>
+          <div className="text-right">
+            <span className="text-[10px] font-black uppercase tracking-widest text-blue-500 italic">Directory</span>
+            <div className="text-[9px] font-bold text-slate-700 uppercase">{SITE_CONFIG.propertyName}</div>
+          </div>
+        </header>
+
+        <div className="w-full relative mb-12">
+          <Search className="absolute left-4 top-5 text-slate-700" size={20} />
+          <input 
+            type="text" 
+            placeholder="Search Residents..." 
+            className="w-full bg-[#0a0a0a] border border-white/5 p-5 pl-12 rounded-2xl text-slate-200 outline-none focus:border-blue-500/30 font-bold transition-colors" 
+            onChange={(e) => setSearchTerm(e.target.value)} 
+          />
+          <p className="text-[9px] text-slate-800 mt-4 font-black uppercase tracking-[0.2em] text-center italic">
+              Search by First or Last Name
+          </p>
+        </div>
+
+        <div className="w-full space-y-3">
+          {loading ? (
+            <div className="flex flex-col items-center mt-12 gap-4">
+              <Loader2 className="animate-spin text-blue-600" size={30} />
+              <span className="text-[9px] font-black uppercase text-slate-800 tracking-[0.3em]">Syncing Brivo...</span>
+            </div>
+          ) : loadError ? (
+            <div className="text-center py-16 border border-dashed border-red-500/20 rounded-[2.5rem]">
+              <p className="text-red-400 font-black uppercase tracking-[0.2em] text-[11px] mb-2">Directory Unavailable</p>
+              <p className="text-slate-500 text-xs px-6">{loadError}</p>
+              <p className="text-slate-700 text-[9px] mt-3 px-6">Please call the office for assistance.</p>
+            </div>
+          ) : filteredResidents.map((res: any) => (
+            <div key={res.id} className="bg-[#0a0a0a] border border-white/5 p-5 rounded-[2rem] flex justify-between items-center transition-all animate-in fade-in zoom-in-95 duration-500">
+              <div className="flex items-center gap-4">
+                <div className="w-11 h-11 bg-blue-600/10 rounded-full flex items-center justify-center text-blue-500 font-black text-sm border border-blue-500/20 shadow-[0_0_15px_rgba(37,99,235,0.1)]">
+                  {res.lastName?.[0]}
+                </div>
+                <div>
+                  <p className="text-lg font-black text-slate-200 uppercase tracking-tighter italic leading-none">{res.firstName} {res.lastName}</p>
+                  <div className="flex items-center gap-1 text-[9px] font-black text-slate-700 uppercase tracking-widest mt-1">
+                    {res.phoneNumber ? (
+                      <><EyeOff size={10} /> Caller ID Protected</>
+                    ) : (
+                      <span className="text-amber-600/80">No number on file</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => { setSelectedResident(res); setIsModalOpen(true); }}
+                disabled={callingId === res.id || !res.phoneNumber}
+                title={!res.phoneNumber ? 'No phone number on file for this resident' : ''}
+                className="bg-blue-600 p-4 rounded-2xl text-white shadow-lg active:scale-95 disabled:opacity-30 disabled:active:scale-100 transition-all hover:bg-blue-500"
+              >
+                {callingId === res.id ? <Loader2 className="animate-spin" size={20} /> : <Phone size={20} fill="currentColor" />}
+              </button>
+            </div>
+          ))}
+
+          {searchTerm.length >= 3 && filteredResidents.length === 0 && !loading && (
+            <div className="text-center py-20 border border-dashed border-white/5 rounded-[2.5rem] opacity-30">
+              <p className="text-slate-500 font-black uppercase tracking-[0.3em] text-[10px]">No Matching Residents</p>
+            </div>
+          )}
+        </div>
+        
+        <footer className="mt-auto py-8 opacity-20 flex items-center justify-center gap-2">
+          <ShieldCheck size={12} className="text-blue-500" />
+          <span className="text-[8px] font-black uppercase tracking-[0.5em]">{SITE_CONFIG.footerText}</span>
+        </footer>
+      </div>
+    </div>
+  );
+}
